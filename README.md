@@ -20,7 +20,7 @@ AI assistant with a midas touch
 3. `cd ..`
 4. `flask --app api run`
 
-Note: The first time you run the server it will download around 10G of model files from HF if you did do install step 5 above. This can take a while.
+Note: The first time you run the server it will download around 10G of model files from HF if you did not do install step 5 above. This can take a while.
 
 
 
