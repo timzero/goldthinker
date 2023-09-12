@@ -1,5 +1,5 @@
 # Goldthinker
-AI assistant with a midas touch
+An AI assistant with a midas touch Mr. Bond! Goldthinker uses a __[sentence transformer](https://huggingface.co/sentence-transformers/all-mpnet-base-v2)__ model to convert the text you want to store into a vector that can be used for semantic search. The vector is then added to an index for approximate nearest neighbor search using the __[Annoy](https://github.com/spotify/annoy)__ library. When you submit a question, the best matches are then fed via prompt to a the __[LLaMa 2 7b chat](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf)__ model as context. Finally, the output from the LLM is piped through __[TTS](https://github.com/coqui-ai/tts)__ to be converted to audio.    
 
 ## Prerequisites
 1. Create a free Hugging Face Account __[here](https://huggingface.co/)__
