@@ -8,31 +8,37 @@ import torch
 from transformers import AutoTokenizer
 import transformers
 from sentence_transformers import SentenceTransformer
+from langchain_openai import OpenAI
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from langchain_openai import OpenAIEmbeddings
 
 _ = load_dotenv(find_dotenv()) # read local .env file
-
-embeddings_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
-
-llama_path = os.getenv('LLAMA_PATH')
-tokenizer = AutoTokenizer.from_pretrained(llama_path)
-pipeline = transformers.pipeline(
-    "text-generation",
-    model=llama_path,
-    torch_dtype=torch.float16,
-    device_map="auto",
-)
 
 class Brain:
     def __init__(self, name):
         self.name = name
         self.data = json.load(open('data.json', 'r', encoding='utf-8')) if os.path.exists('data.json') else []
+        self.embeds = json.load(open('embeds.json', 'r', encoding='utf-8')) if os.path.exists('embeds.json') else []
         self.search_index = self._index() if len(self.data) > 0 else None
 
     def store(self, text):
         self.data.append(text)
-        self._index()
+        
         with open('data.json', 'w', encoding='utf-8') as filehandle:
             json.dump(self.data, filehandle)
+
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+
+        # Get the embeddings
+        response = embeddings.embed_query(text)
+
+        self.embeds.append(response)
+        with open('embeds.json', 'w', encoding='utf-8') as filehandle:
+            json.dump(self.embeds, filehandle)
+
+        self._index()
+
         return f"Added {text}"
 
     def recall(self, question, num_generations=1):
@@ -40,40 +46,42 @@ class Brain:
             return "No, Mister Bond. I expect you to die."
 
         # Search the text archive
-        results = self._search(question)
+        results = self._search(question).tolist()
+        results.append(f'Today is {date.today().strftime("%A %B %d, %Y")}')
 
         # Get the top result
         context = results
 
         # Prepare the prompt
-        prompt = f"""
-        [INST]Use the following text to answer the question: 
-        Today is {date.today().strftime("%A %B %d, %Y")}
-        Context: {context}
-        Question: {question}
-        
-        Answer of the question above.
-        Prefer information included in the context above the question if it is relevant. 
-        Prefer one sentence answers over single words.
-        Always refer to the person asking the question as Mister Bond[/INST]
-        """
+        template = """Question: "{question}" Use the following information to help answer the question: "{context}" If you do not know the answer, please respond with: I do not know the answer to that question.
+        Always refer to the person asking the question as "Mr. Bond" in your answer. Do not include information that is not relevant to the question.
+        Answer: Here is the answer to your question."""
+
+        prompt = PromptTemplate(template=template, input_variables=["context", "question"])
+
+        llm = OpenAI()
+        llm_chain = LLMChain(prompt=prompt, llm=llm)
+
+        inputs = {
+            "context": context,
+            "question": question,
+        }
+
+        print(f"Question: {question}")
+        print(f"Context: {context}")
+
+        response = llm_chain.run(inputs)
 
         print(prompt)
+        print(response)
 
-        sequences = pipeline(
-            prompt,
-            do_sample=True,
-            top_k=10,
-            num_return_sequences=num_generations,
-            eos_token_id=tokenizer.eos_token_id,
-            max_length=500,
-        )
-
-        return sequences[0]['generated_text'][len(prompt):]
+        return response
 
     def _search(self, query):
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+
         # Get the query's embedding
-        query_embed = embeddings_model.encode(query)
+        query_embed = embeddings.embed_query(query)
 
         # Retrieve the nearest neighbors
         similar_item_ids = self.search_index.get_nns_by_vector(query_embed,
@@ -85,20 +93,15 @@ class Brain:
         search_results = np.array(self.data)[matches]
 
         return search_results
+  
 
     def _index(self):
-        # Get the embeddings
-        response = embeddings_model.encode(self.data)
-
-        # Check the dimensions of the embeddings
-        embeds = np.array(response)
-
         # Create the search index, pass the size of embedding
-        search_index = AnnoyIndex(embeds.shape[1], 'angular')
+        search_index = AnnoyIndex(len(self.embeds[0]), 'angular')
         
         # Add all the vectors to the search index
-        for i, embed in enumerate(embeds):
-            search_index.add_item(i, embed)
+        for i, embed in enumerate(self.embeds):
+            search_index.add_item(i, np.array(embed))
 
         search_index.build(10) # 10 trees
         search_index.save('index.ann')
